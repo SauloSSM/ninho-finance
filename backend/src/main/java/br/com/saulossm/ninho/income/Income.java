@@ -133,10 +133,15 @@ public class Income {
     }
 
     public void markReceived(LocalDateTime receivedAt) {
+        markReceived(receivedAt, bankAccount);
+    }
+
+    public void markReceived(LocalDateTime receivedAt, BankAccount bankAccount) {
         if (status != IncomeStatus.EXPECTED) {
             throw new IllegalStateException("only expected income can be received");
         }
         this.receivedAt = Objects.requireNonNull(receivedAt, "receivedAt is required");
+        this.bankAccount = bankAccount;
         status = IncomeStatus.RECEIVED;
     }
 

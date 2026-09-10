@@ -12,4 +12,8 @@ public interface BankAccountRepository extends JpaRepository<BankAccount, Long> 
     List<BankAccount> findAllByOwner(Person owner);
 
     List<BankAccount> findAllByOwnerAndActiveTrue(Person owner);
+
+    List<BankAccount> findAllByActive(boolean active);
+
+    List<BankAccount> findAllByOwnerAndActive(Person owner, boolean active);
 }
