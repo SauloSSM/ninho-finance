@@ -8,6 +8,8 @@ public interface PersonRepository extends JpaRepository<Person, Long> {
 
     List<Person> findAllByActiveTrue();
 
+    List<Person> findAllByActive(boolean active);
+
     List<Person> findAllByType(PersonType type);
 
     List<Person> findAllByTypeAndActiveTrue(PersonType type);
