@@ -345,6 +345,138 @@ class AlphaApiIntegrationTest {
                 .andExpect(jsonPath("$.title").value("Conflict"));
     }
 
+    @Test
+    void rejectsDirectCardExpensePaymentButAllowsPartialAndFullInvoicePayments() throws Exception {
+        var owner = person("Card payment rule");
+        var invoice = invoice(owner, 2040, 1, null);
+        var expense = expense(owner, invoice, 10000, ExpenseScope.PERSONAL, LocalDateTime.of(2040, 1, 10, 12, 0));
+        long before = paymentRepository.count();
+        mockMvc.perform(post("/api/payments").contentType(MediaType.APPLICATION_JSON)
+                        .content(paymentJson(owner.getId(), 10000, expense.getId(), null, null)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value("Despesas vinculadas a uma fatura devem ser pagas pela fatura."));
+        assertThat(paymentRepository.count()).isEqualTo(before);
+        mockMvc.perform(post("/api/payments").contentType(MediaType.APPLICATION_JSON)
+                        .content(paymentJson(owner.getId(), 4000, null, null, invoice.getId())))
+                .andExpect(status().isCreated());
+        mockMvc.perform(post("/api/payments").contentType(MediaType.APPLICATION_JSON)
+                        .content(paymentJson(owner.getId(), 6001, null, null, invoice.getId())))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/api/payments").contentType(MediaType.APPLICATION_JSON)
+                        .content(paymentJson(owner.getId(), 6000, null, null, invoice.getId())))
+                .andExpect(status().isCreated());
+        mockMvc.perform(get("/api/invoices/{id}", invoice.getId()))
+                .andExpect(jsonPath("$.paidAmountCents").value(10000))
+                .andExpect(jsonPath("$.outstandingAmountCents").value(0));
+        mockMvc.perform(post("/api/payments").contentType(MediaType.APPLICATION_JSON)
+                        .content(paymentJson(owner.getId(), 1, null, null, invoice.getId())))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void acceptsNonCardExpensePaymentAndRejectsOverpayment() throws Exception {
+        var owner = person("Non card payment");
+        var expense = expense(owner, null, 10000, ExpenseScope.PERSONAL, LocalDateTime.of(2040, 2, 10, 12, 0));
+        mockMvc.perform(post("/api/payments").contentType(MediaType.APPLICATION_JSON)
+                        .content(paymentJson(owner.getId(), 4000, expense.getId(), null, null)))
+                .andExpect(status().isCreated());
+        mockMvc.perform(post("/api/payments").contentType(MediaType.APPLICATION_JSON)
+                        .content(paymentJson(owner.getId(), 6001, expense.getId(), null, null)))
+                .andExpect(status().isBadRequest());
+        assertThat(paymentRepository.sumAmountByExpenseId(expense.getId())).isEqualTo(4000);
+    }
+
+    @Test
+    void overviewIncludesUnpaidNonCardExpensesWithoutCountingCardPurchasesTwice() throws Exception {
+        var owner = person("Outstanding overview");
+        var bill = bill(owner, 20000, 2040, 3);
+        var invoice = invoice(owner, 2040, 3, null);
+        expense(owner, invoice, 30000, ExpenseScope.HOUSEHOLD, LocalDateTime.of(2040, 3, 10, 12, 0));
+        var outside = expense(owner, null, 40000, ExpenseScope.HOUSEHOLD, LocalDateTime.of(2040, 3, 10, 12, 0));
+        var paidExpense = expense(owner, null, 1000, ExpenseScope.PERSONAL, LocalDateTime.of(2040, 3, 10, 12, 0));
+        expense(owner, null, 9000, ExpenseScope.PERSONAL, LocalDateTime.of(2040, 4, 10, 12, 0));
+        postBillPayment(owner.getId(), bill.getId(), 5000).andExpect(status().isCreated());
+        for (var payment : new String[]{
+                paymentJson(owner.getId(), 10000, null, null, invoice.getId()),
+                paymentJson(owner.getId(), 10000, outside.getId(), null, null),
+                paymentJson(owner.getId(), 1000, paidExpense.getId(), null, null)}) {
+            mockMvc.perform(post("/api/payments").contentType(MediaType.APPLICATION_JSON).content(payment))
+                    .andExpect(status().isCreated());
+        }
+        mockMvc.perform(get("/api/overview/monthly").param("year", "2040").param("month", "3"))
+                .andExpect(jsonPath("$.householdBills.outstandingCents").value(15000))
+                .andExpect(jsonPath("$.creditCards.outstandingCents").value(20000))
+                .andExpect(jsonPath("$.expenses.totalCents").value(41000))
+                .andExpect(jsonPath("$.expenses.paidCents").value(11000))
+                .andExpect(jsonPath("$.expenses.outstandingCents").value(30000))
+                .andExpect(jsonPath("$.outstandingCents").value(65000))
+                .andExpect(jsonPath("$.hasActivity").value(true));
+    }
+
+    @Test
+    void cancelledBillHasNoDebtAndIsExcludedFromSummaryEvenWithHistoricalPayment() throws Exception {
+        var owner = person("Cancelled summary");
+        var bill = bill(owner, 7000, 2041, 1);
+        postBillPayment(owner.getId(), bill.getId(), 2000).andExpect(status().isCreated());
+        mockMvc.perform(patch("/api/bills/{id}/cancel", bill.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"))
+                .andExpect(jsonPath("$.paidAmountCents").value(2000))
+                .andExpect(jsonPath("$.outstandingAmountCents").value(0));
+        mockMvc.perform(get("/api/bills").param("referenceYear", "2041").param("referenceMonth", "1"))
+                .andExpect(jsonPath("$[0].outstandingAmountCents").value(0));
+        mockMvc.perform(get("/api/overview/monthly/bills").param("year", "2041").param("month", "1"))
+                .andExpect(jsonPath("$[0].outstandingAmountCents").value(0));
+        mockMvc.perform(get("/api/overview/monthly").param("year", "2041").param("month", "1"))
+                .andExpect(jsonPath("$.householdBills.totalCents").value(0))
+                .andExpect(jsonPath("$.householdBills.paidCents").value(0))
+                .andExpect(jsonPath("$.householdBills.outstandingCents").value(0))
+                .andExpect(jsonPath("$.outstandingCents").value(0));
+    }
+
+    @Test
+    void receivedIncomeUsesReceiptMonthAndKeepsThatMonthNonEmpty() throws Exception {
+        var owner = person("Cross month income");
+        var result = mockMvc.perform(post("/api/incomes").contentType(MediaType.APPLICATION_JSON).content("""
+                {"personId":%d,"categoryId":%d,"description":"Cross month","amountCents":15000,"expectedDate":"2042-01-31"}
+                """.formatted(owner.getId(), incomeCategory().getId())))
+                .andExpect(status().isCreated()).andReturn();
+        mockMvc.perform(patch("/api/incomes/{id}/receive", extractId(result.getResponse().getContentAsString()))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"receivedAt\":\"2042-02-01T00:00:00\"}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/overview/monthly").param("year", "2042").param("month", "1"))
+                .andExpect(jsonPath("$.income.expectedCents").value(15000))
+                .andExpect(jsonPath("$.income.receivedCents").value(0));
+        mockMvc.perform(get("/api/overview/monthly").param("year", "2042").param("month", "2"))
+                .andExpect(jsonPath("$.income.expectedCents").value(0))
+                .andExpect(jsonPath("$.income.receivedCents").value(15000))
+                .andExpect(jsonPath("$.hasActivity").value(true));
+        mockMvc.perform(get("/api/overview/monthly").param("year", "2042").param("month", "3"))
+                .andExpect(jsonPath("$.hasActivity").value(false));
+    }
+
+    @Test
+    void monthWithOnlyPaymentForEarlierObligationIsNotEmpty() throws Exception {
+        var owner = person("Payment activity");
+        var bill = bill(owner, 10000, 2043, 1);
+        mockMvc.perform(post("/api/payments").contentType(MediaType.APPLICATION_JSON).content("""
+                {"payerPersonId":%d,"method":"CASH","amountCents":1000,"paidAt":"2043-02-01T12:00:00","householdBillId":%d}
+                """.formatted(owner.getId(), bill.getId()))).andExpect(status().isCreated());
+        mockMvc.perform(get("/api/overview/monthly").param("year", "2043").param("month", "2"))
+                .andExpect(jsonPath("$.hasActivity").value(true));
+    }
+
+    @Test
+    void monthWithOnlySettlementIsNotEmpty() throws Exception {
+        var from = person("Settlement from");
+        var to = person("Settlement to");
+        mockMvc.perform(post("/api/settlements").contentType(MediaType.APPLICATION_JSON).content("""
+                {"fromPersonId":%d,"toPersonId":%d,"amountCents":1000,"paidAt":"2044-01-01T12:00:00"}
+                """.formatted(from.getId(), to.getId()))).andExpect(status().isCreated());
+        mockMvc.perform(get("/api/overview/monthly").param("year", "2044").param("month", "1"))
+                .andExpect(jsonPath("$.hasActivity").value(true));
+    }
+
     private org.springframework.test.web.servlet.ResultActions postBillPayment(long payerId, long billId, long amount)
             throws Exception {
         return mockMvc.perform(post("/api/payments")

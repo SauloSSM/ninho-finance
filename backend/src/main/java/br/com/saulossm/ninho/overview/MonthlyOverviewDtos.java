@@ -20,7 +20,7 @@ public final class MonthlyOverviewDtos {
     public record CreditCards(Long totalCents, Long paidCents, Long outstandingCents) {
     }
 
-    public record Expenses(Long personalCents, Long householdCents, Long totalCents) {
+    public record Expenses(Long personalCents, Long householdCents, Long totalCents, Long paidCents, Long outstandingCents) {
     }
 
     public record Response(
@@ -29,7 +29,9 @@ public final class MonthlyOverviewDtos {
             Income income,
             HouseholdBills householdBills,
             CreditCards creditCards,
-            Expenses expenses
+            Expenses expenses,
+            Long outstandingCents,
+            boolean hasActivity
     ) {
     }
 

@@ -9,6 +9,7 @@ import br.com.saulossm.ninho.expense.ExpenseRepository;
 import br.com.saulossm.ninho.expense.ExpenseScope;
 import br.com.saulossm.ninho.income.IncomeRepository;
 import br.com.saulossm.ninho.payment.PaymentRepository;
+import br.com.saulossm.ninho.payment.SettlementPaymentRepository;
 import br.com.saulossm.ninho.person.PersonDtos;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,19 +26,22 @@ public class MonthlyOverviewService {
     private final CreditCardInvoiceRepository invoiceRepository;
     private final ExpenseRepository expenseRepository;
     private final PaymentRepository paymentRepository;
+    private final SettlementPaymentRepository settlementRepository;
 
     public MonthlyOverviewService(
             IncomeRepository incomeRepository,
             HouseholdBillRepository billRepository,
             CreditCardInvoiceRepository invoiceRepository,
             ExpenseRepository expenseRepository,
-            PaymentRepository paymentRepository
+            PaymentRepository paymentRepository,
+            SettlementPaymentRepository settlementRepository
     ) {
         this.incomeRepository = incomeRepository;
         this.billRepository = billRepository;
         this.invoiceRepository = invoiceRepository;
         this.expenseRepository = expenseRepository;
         this.paymentRepository = paymentRepository;
+        this.settlementRepository = settlementRepository;
     }
 
     @Transactional(readOnly = true)
@@ -92,6 +96,21 @@ public class MonthlyOverviewService {
                 startDate.atStartOfDay(), endDate.atStartOfDay(), ExpenseScope.HOUSEHOLD
         );
 
+        long expensePaid = 0;
+        long expenseOutstanding = 0;
+        var expenses = expenseRepository.findFiltered(startDate.atStartOfDay(), endDate.atStartOfDay(), null, null, null);
+        for (var expense : expenses) {
+            if (expense.getCreditCardInvoice() == null) {
+                long paid = paymentRepository.sumAmountByExpenseId(expense.getId());
+                expensePaid += paid;
+                expenseOutstanding += Math.max(expense.getAmountCents() - paid, 0);
+            }
+        }
+        boolean hasActivity = expectedIncome != 0 || receivedIncome != 0 || !expenses.isEmpty()
+                || !billsFor(period).isEmpty() || !invoicesFor(period).isEmpty()
+                || paymentRepository.existsByPaidAtGreaterThanEqualAndPaidAtLessThan(startDate.atStartOfDay(), endDate.atStartOfDay())
+                || settlementRepository.existsByPaidAtGreaterThanEqualAndPaidAtLessThan(startDate.atStartOfDay(), endDate.atStartOfDay());
+
         return new MonthlyOverviewDtos.Response(
                 year,
                 month,
@@ -101,8 +120,12 @@ public class MonthlyOverviewService {
                 new MonthlyOverviewDtos.Expenses(
                         personalExpenses,
                         householdExpenses,
-                        personalExpenses + householdExpenses
-                )
+                        personalExpenses + householdExpenses,
+                        expensePaid,
+                        expenseOutstanding
+                ),
+                billOutstanding + invoiceOutstanding + expenseOutstanding,
+                hasActivity
         );
     }
 
@@ -124,7 +147,7 @@ public class MonthlyOverviewService {
                 bill.getName(),
                 effective,
                 paid,
-                Math.max(effective - paid, 0),
+                bill.getStatus() == HouseholdBillStatus.CANCELLED ? 0 : Math.max(effective - paid, 0),
                 bill.getDueDate(),
                 bill.getStatus(),
                 isOverdue(bill),
