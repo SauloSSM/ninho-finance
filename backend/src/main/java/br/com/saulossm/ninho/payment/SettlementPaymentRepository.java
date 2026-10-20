@@ -10,6 +10,8 @@ import java.util.List;
 
 public interface SettlementPaymentRepository extends JpaRepository<SettlementPayment, Long> {
 
+    boolean existsByPaidAtGreaterThanEqualAndPaidAtLessThan(LocalDateTime start, LocalDateTime end);
+
     List<SettlementPayment> findAllByFromPerson(Person fromPerson);
 
     List<SettlementPayment> findAllByToPerson(Person toPerson);

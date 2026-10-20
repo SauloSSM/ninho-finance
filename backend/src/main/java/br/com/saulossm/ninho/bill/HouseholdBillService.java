@@ -104,7 +104,7 @@ public class HouseholdBillService {
     HouseholdBillDtos.Response toResponse(HouseholdBill bill) {
         long effective = bill.getEffectiveAmountCents();
         long paid = paymentRepository.sumAmountByHouseholdBillId(bill.getId());
-        long outstanding = Math.max(effective - paid, 0);
+        long outstanding = bill.getStatus() == HouseholdBillStatus.CANCELLED ? 0 : Math.max(effective - paid, 0);
         boolean overdue = bill.getDueDate().isBefore(LocalDate.now())
                 && bill.getStatus() != HouseholdBillStatus.PAID
                 && bill.getStatus() != HouseholdBillStatus.CANCELLED;

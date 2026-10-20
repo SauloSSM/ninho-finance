@@ -13,6 +13,8 @@ import java.util.List;
 
 public interface PaymentRepository extends JpaRepository<Payment, Long> {
 
+    boolean existsByPaidAtGreaterThanEqualAndPaidAtLessThan(LocalDateTime start, LocalDateTime end);
+
     List<Payment> findAllByPayerPerson(Person payerPerson);
 
     List<Payment> findAllByExpense(Expense expense);

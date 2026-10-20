@@ -11,4 +11,7 @@ export function monthRange(year: number, month: number) {
 }
 
 export function toLocalDateTime(date: string): string { return `${date}T12:00:00`; }
-export function todayIso(): string { return new Date().toISOString().slice(0, 10); }
+export function todayIso(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}

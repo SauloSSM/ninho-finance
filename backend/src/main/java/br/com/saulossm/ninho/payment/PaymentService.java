@@ -56,6 +56,9 @@ public class PaymentService {
         CreditCardInvoice invoice = optionalInvoice(request.creditCardInvoiceId());
 
         if (expense != null) {
+            if (expense.getCreditCardInvoice() != null) {
+                throw new BusinessRuleException("Despesas vinculadas a uma fatura devem ser pagas pela fatura.");
+            }
             rejectOverpayment(
                     repository.sumAmountByExpenseId(expense.getId()),
                     request.amountCents(),
