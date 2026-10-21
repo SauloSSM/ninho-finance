@@ -1,4 +1,5 @@
 import type { ProblemDetail } from './types';
+import { fieldLabel, friendlyError } from '../utils/errors';
 
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api').replace(/\/$/, '');
 
@@ -15,9 +16,9 @@ export class ApiError extends Error {
 }
 
 export function problemToApiError(problem: ProblemDetail, fallbackStatus = 0): ApiError {
-  const fields = Object.fromEntries((problem.errors ?? []).map(({ field, message }) => [field, message]));
-  const validation = problem.errors?.map((error) => error.message).filter(Boolean).join(' ');
-  const detail = problem.detail ? (technicalMessages[problem.detail] ?? problem.detail) : '';
+  const fields = Object.fromEntries((problem.errors ?? []).map(({ field, message }) => [field, friendlyError(message)]));
+  const validation = problem.errors?.map(({ field, message }) => `${fieldLabel(field)}: ${friendlyError(message)}`).join(' ');
+  const detail = problem.detail ? (technicalMessages[problem.detail] ?? friendlyError(problem.detail)) : '';
   return new ApiError(validation || detail || 'Não foi possível concluir a ação.', problem.status ?? fallbackStatus, fields);
 }
 

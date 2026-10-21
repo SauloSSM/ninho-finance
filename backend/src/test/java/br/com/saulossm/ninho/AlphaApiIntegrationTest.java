@@ -477,6 +477,74 @@ class AlphaApiIntegrationTest {
                 .andExpect(jsonPath("$.hasActivity").value(true));
     }
 
+    @Test
+    void invoicePurchasesIncludeOtherMonthsWhenOnlyInvoiceIsFiltered() throws Exception {
+        var owner = person("Cross-month invoice owner");
+        var invoice = invoice(owner, 2045, 2, null);
+        expense(owner, invoice, 3000, ExpenseScope.HOUSEHOLD, LocalDateTime.of(2045, 1, 31, 12, 0));
+        expense(owner, invoice, 7000, ExpenseScope.PERSONAL, LocalDateTime.of(2045, 2, 5, 12, 0));
+        expense(owner, null, 9000, ExpenseScope.PERSONAL, LocalDateTime.of(2045, 2, 5, 12, 0));
+        mockMvc.perform(get("/api/expenses").param("creditCardInvoiceId", invoice.getId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2));
+        mockMvc.perform(get("/api/invoices/{id}", invoice.getId()))
+                .andExpect(jsonPath("$.calculatedTotalCents").value(10000));
+    }
+
+    @Test
+    void inactiveCardKeepsInvoiceHistoryAndPaymentsButRejectsNewInvoicesAndPurchases() throws Exception {
+        var owner = person("Inactive card owner");
+        var invoice = invoice(owner, 2046, 2, null);
+        expense(owner, invoice, 10000, ExpenseScope.HOUSEHOLD, LocalDateTime.of(2046, 1, 31, 12, 0));
+        mockMvc.perform(patch("/api/cards/{id}/status", invoice.getCreditCard().getId())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"active\":false}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/invoices").param("creditCardId", invoice.getCreditCard().getId().toString()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
+        mockMvc.perform(post("/api/payments").contentType(MediaType.APPLICATION_JSON)
+                        .content(paymentJson(owner.getId(), 3000, null, null, invoice.getId())))
+                .andExpect(status().isCreated());
+        mockMvc.perform(get("/api/invoices/{id}", invoice.getId()))
+                .andExpect(jsonPath("$.paidAmountCents").value(3000))
+                .andExpect(jsonPath("$.outstandingAmountCents").value(7000));
+        mockMvc.perform(post("/api/invoices").contentType(MediaType.APPLICATION_JSON).content("""
+                {"creditCardId":%d,"referenceYear":2046,"referenceMonth":3,"dueDate":"2046-03-12"}
+                """.formatted(invoice.getCreditCard().getId())))
+                .andExpect(status().isBadRequest());
+        long before = expenseRepository.count();
+        mockMvc.perform(post("/api/expenses").contentType(MediaType.APPLICATION_JSON).content("""
+                {"description":"New purchase","categoryId":%d,"amountCents":1000,"scope":"PERSONAL",
+                 "occurredAt":"2046-02-02T12:00:00","creditCardInvoiceId":%d,
+                 "allocations":[{"personId":%d,"amountCents":1000}]}
+                """.formatted(expenseCategory().getId(), invoice.getId(), owner.getId())))
+                .andExpect(status().isBadRequest());
+        assertThat(expenseRepository.count()).isEqualTo(before);
+    }
+
+    @Test
+    void paymentHistoryPreservesTargetsAndPayerAcrossDifferentMonths() throws Exception {
+        var owner = person("History payer");
+        var bill = bill(owner, 10000, 2047, 1);
+        var invoice = invoice(owner, 2047, 1, null);
+        expense(owner, invoice, 10000, ExpenseScope.HOUSEHOLD, LocalDateTime.of(2047, 1, 10, 12, 0));
+        var direct = expense(owner, null, 10000, ExpenseScope.PERSONAL, LocalDateTime.of(2047, 1, 10, 12, 0));
+        for (String body : new String[] {
+                paymentJson(owner.getId(), 2000, null, bill.getId(), null),
+                paymentJson(owner.getId(), 3000, null, null, invoice.getId()),
+                paymentJson(owner.getId(), 4000, direct.getId(), null, null) }) {
+            mockMvc.perform(post("/api/payments").contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isCreated());
+        }
+        mockMvc.perform(get("/api/payments").param("payerPersonId", owner.getId().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(3))
+                .andExpect(jsonPath("$[0].payerPerson.name").value(owner.getName()))
+                .andExpect(jsonPath("$[0].method").value("PIX"))
+                .andExpect(jsonPath("$[?(@.householdBillId == %d)]".formatted(bill.getId())).exists())
+                .andExpect(jsonPath("$[?(@.creditCardInvoiceId == %d)]".formatted(invoice.getId())).exists())
+                .andExpect(jsonPath("$[?(@.expenseId == %d)]".formatted(direct.getId())).exists());
+    }
+
     private org.springframework.test.web.servlet.ResultActions postBillPayment(long payerId, long billId, long amount)
             throws Exception {
         return mockMvc.perform(post("/api/payments")

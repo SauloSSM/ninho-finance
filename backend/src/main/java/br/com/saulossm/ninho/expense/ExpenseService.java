@@ -137,8 +137,12 @@ public class ExpenseService {
     }
 
     private CreditCardInvoice optionalInvoice(Long id) {
-        return id == null ? null : invoiceRepository.findById(id)
+        var invoice = id == null ? null : invoiceRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Invoice", id));
+        if (invoice != null && !invoice.getCreditCard().isActive()) {
+            throw new BusinessRuleException("Cartão inativo. Não é possível registrar novas compras neste cartão.");
+        }
+        return invoice;
     }
 
     private static void validateRange(LocalDate from, LocalDate to) {
