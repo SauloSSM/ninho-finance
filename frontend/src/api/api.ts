@@ -1,5 +1,5 @@
 import { json, query, request } from './client';
-import type { BankAccount, Bill, Category, CreditCard, Expense, Income, Invoice, MonthlyOverview, OverviewBill, OverviewInvoice, Person, Settlement } from './types';
+import type { BankAccount, Bill, Category, CreditCard, Expense, Income, Invoice, MonthlyOverview, OverviewBill, OverviewInvoice, Person, Settlement, Payment } from './types';
 
 export const api = {
   people: {
@@ -35,7 +35,7 @@ export const api = {
     close: (id: number) => request<Invoice>(`/invoices/${id}/close`, json('PATCH')),
   },
   expenses: {
-    list: (from: string, to: string, creditCardInvoiceId?: number) => request<Expense[]>(`/expenses${query({ from, to, creditCardInvoiceId })}`),
+    list: (from?: string, to?: string, creditCardInvoiceId?: number) => request<Expense[]>(`/expenses${query({ from, to, creditCardInvoiceId })}`),
     create: (body: unknown) => request<Expense>('/expenses', json('POST', body)),
   },
   incomes: {
@@ -44,7 +44,7 @@ export const api = {
     receive: (id: number, body: unknown) => request<Income>(`/incomes/${id}/receive`, json('PATCH', body)),
     cancel: (id: number) => request<Income>(`/incomes/${id}/cancel`, json('PATCH')),
   },
-  payments: { create: (body: unknown) => request('/payments', json('POST', body)) },
+  payments: { list: () => request<Payment[]>('/payments'), create: (body: unknown) => request('/payments', json('POST', body)) },
   settlements: {
     list: (from: string, to: string) => request<Settlement[]>(`/settlements${query({ from, to })}`),
     create: (body: unknown) => request<Settlement>('/settlements', json('POST', body)),

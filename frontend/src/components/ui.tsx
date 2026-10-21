@@ -7,7 +7,7 @@ export function Button({ variant = 'default', className = '', ...props }: Button
 export function StatusBadge({ status, danger }: { status: string; danger?: boolean }) {
   const success = ['PAID', 'RECEIVED', 'ACTIVE'].includes(status);
   const isDanger = danger || status === 'CANCELLED';
-  return <span className={`badge ${success ? 'success' : isDanger ? 'danger' : status === 'CLOSED' ? 'neutral' : ''}`}>{friendlyLabel(status)}</span>;
+  return <span className={`badge ${success ? 'success' : isDanger ? 'danger' : ['CLOSED', 'INACTIVE'].includes(status) ? 'neutral' : ''}`}>{friendlyLabel(status)}</span>;
 }
 export function FormField({ label, error, full, children }: { label: string; error?: string; full?: boolean; children: ReactNode }) {
   const id = useId();
@@ -21,11 +21,13 @@ export function CurrencyInput({ value, onChange, ...props }: Omit<InputHTMLAttri
 }
 export function Modal({ title, subtitle, onClose, small, children }: { title: string; subtitle?: string; onClose: () => void; small?: boolean; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     ref.current?.focus();
     const handler = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') closeRef.current();
       if (event.key === 'Tab' && ref.current) {
         const focusable = [...ref.current.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [href], [tabindex]:not([tabindex="-1"])')];
         if (!focusable.length) return;
@@ -36,7 +38,7 @@ export function Modal({ title, subtitle, onClose, small, children }: { title: st
     };
     document.addEventListener('keydown', handler); document.body.style.overflow = 'hidden';
     return () => { document.removeEventListener('keydown', handler); document.body.style.overflow = ''; previous?.focus(); };
-  }, [onClose]);
+  }, []);
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className={`modal ${small ? 'small' : ''}`} role="dialog" aria-modal="true" aria-labelledby="modal-title" tabIndex={-1} ref={ref}><header className="modal-header"><div><h2 id="modal-title">{title}</h2>{subtitle && <p>{subtitle}</p>}</div><button className="close-button" aria-label="Fechar" onClick={onClose}>×</button></header>{children}</div></div>;
 }
 export function LoadingState() { return <div className="state" role="status"><p>Carregando seu Ninho…</p></div>; }

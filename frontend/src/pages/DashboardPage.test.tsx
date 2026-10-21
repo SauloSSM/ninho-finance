@@ -1,9 +1,10 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { vi } from 'vitest';
 import { AppProvider } from '../context/AppContext';
 import { DashboardPage } from './DashboardPage';
 import { api } from '../api/api';
+import type { OverviewBill } from '../api/types';
 vi.mock('../api/api', () => ({ api:{ overview:{ monthly:vi.fn().mockRejectedValue(new Error('Backend indisponível')), bills:vi.fn(), invoices:vi.fn() } } }));
 it('exibe estado de erro quando o backend não responde', async () => {
   render(<MemoryRouter><AppProvider><DashboardPage /></AppProvider></MemoryRouter>);
@@ -42,4 +43,22 @@ it('mostra vazio quando o backend informa mês sem atividade', async () => {
   vi.mocked(api.overview.invoices).mockResolvedValueOnce([]);
   render(<MemoryRouter><AppProvider><DashboardPage /></AppProvider></MemoryRouter>);
   expect(await screen.findByText('Seu Ninho está começando.')).toBeInTheDocument();
+});
+it('prioriza atrasadas e ordena próximas contas sem pagas ou canceladas', async () => {
+  vi.mocked(api.overview.monthly).mockResolvedValueOnce(overview(true));
+  vi.mocked(api.overview.invoices).mockResolvedValueOnce([]);
+  vi.mocked(api.overview.bills).mockResolvedValueOnce([
+    { id: 1, name: 'Paga teste', status: 'PAID', dueDate: '2026-10-01', overdue: true },
+    { id: 2, name: 'Cancelada teste', status: 'CANCELLED', dueDate: '2026-10-01', overdue: true },
+    { id: 3, name: 'Pendente distante', status: 'PENDING', dueDate: '2026-10-30', overdue: false },
+    { id: 4, name: 'Parcial atrasada', status: 'PARTIALLY_PAID', dueDate: '2026-10-10', overdue: true },
+    { id: 5, name: 'Pendente próxima', status: 'PENDING', dueDate: '2026-10-25', overdue: false },
+  ] as OverviewBill[]);
+  render(<MemoryRouter><AppProvider><DashboardPage /></AppProvider></MemoryRouter>);
+  const section = (await screen.findByText('Próximas contas')).closest('section')!;
+  const rows = within(section).getAllByRole('listitem');
+  expect(rows.map(row => row.querySelector('.row-primary')?.textContent)).toEqual(['Parcial atrasada', 'Pendente próxima', 'Pendente distante']);
+  expect(screen.queryByText('Paga teste')).not.toBeInTheDocument();
+  expect(screen.queryByText('Cancelada teste')).not.toBeInTheDocument();
+  expect(screen.getByText('1 conta está atrasada')).toBeInTheDocument();
 });

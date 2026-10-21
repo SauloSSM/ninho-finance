@@ -1,6 +1,7 @@
 package br.com.saulossm.ninho.card;
 
 import br.com.saulossm.ninho.error.ConflictException;
+import br.com.saulossm.ninho.error.BusinessRuleException;
 import br.com.saulossm.ninho.error.ResourceNotFoundException;
 import br.com.saulossm.ninho.expense.ExpenseRepository;
 import br.com.saulossm.ninho.payment.PaymentRepository;
@@ -33,6 +34,9 @@ public class InvoiceService {
     public InvoiceDtos.Response create(InvoiceDtos.CreateRequest request) {
         var card = cardRepository.findById(request.creditCardId())
                 .orElseThrow(() -> new ResourceNotFoundException("Credit card", request.creditCardId()));
+        if (!card.isActive()) {
+            throw new BusinessRuleException("Cartão inativo. Ative o cartão antes de criar uma nova fatura.");
+        }
         if (repository.findByCreditCardAndReferenceYearAndReferenceMonth(
                 card, request.referenceYear(), request.referenceMonth()
         ).isPresent()) {
